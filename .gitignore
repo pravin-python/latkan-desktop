@@ -1,0 +1,47 @@
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+.installed.cfg
+
+# --- Virtual environments ----------------------------------------------------
+.venv/
+venv/
+env/
+.python-version
+
+# --- Tooling caches ----------------------------------------------------------
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- Build output (scripts/build.py, PyInstaller, AppImage, Inno Setup) ------
+# NOTE: do not add "*.spec" here - packaging/latkan.spec is a tracked source file.
+/build/
+/dist/
+*.AppImage
+*.dmg
+*.zip
+*.tar.gz
+
+# --- Generated icons (re-create with: python scripts/make_icons.py) ----------
+/assets/icon.png
+/assets/icon-256.png
+/assets/icon.ico
+/assets/icon.icns
+/assets/tray.png
+
+# --- Editors / OS ------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini

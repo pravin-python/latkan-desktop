@@ -1,0 +1,91 @@
+[build-system]
+# setuptools >= 77 understands SPDX `license = "MIT"` (PEP 639) and PEP 660 editable installs.
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "latkan"
+dynamic = ["version"]
+description = "Charms that hang from the top of your screen on physics-simulated ropes."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Latkan contributors" }]
+keywords = ["desktop", "charm", "overlay", "physics", "toy", "qt", "pyside6"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: MacOS X :: Cocoa",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Desktop Environment",
+    "Topic :: Games/Entertainment",
+]
+dependencies = [
+    # Essentials = QtCore/QtGui/QtWidgets/QtNetwork/QtSvg (+ image-format plugins), which is all Latkan
+    # uses. The full "PySide6" meta-package also pulls PySide6-Addons (WebEngine, 3D, Multimedia, ...),
+    # several hundred MB we never import. An existing full PySide6 install satisfies this requirement.
+    "PySide6-Essentials>=6.5",
+    # Native window level / all-Spaces / no-Dock-icon tweaks. Optional at runtime (degrades gracefully).
+    "pyobjc-framework-Cocoa>=9; sys_platform == 'darwin'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "ruff>=0.5",
+    "pyinstaller>=6",
+    "pillow>=10.1",
+]
+
+[project.gui-scripts]
+# gui-scripts: on Windows the launcher is built against pythonw, so no console window appears.
+latkan = "latkan.app:main"
+
+[tool.setuptools.dynamic]
+# setuptools reads the literal statically (AST) - importing latkan (and thus Qt) is not needed to build.
+version = { attr = "latkan.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["latkan", "latkan.*"]
+
+# ---------------------------------------------------------------------------------------------- pytest
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
+
+# ------------------------------------------------------------------------------------------------ ruff
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+src = ["src", "tests", "scripts"]
+extend-exclude = ["build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "B024",  # abstract class without abstract methods: PlatformIntegration deliberately has no-op defaults
+    "B027",  # empty method in abstract class: same reason
+    "B905",  # zip() without strict=: noisy for the many equal-length point lists in the physics code
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts and tests must set QT_QPA_PLATFORM / sys.path before importing Qt or latkan.
+"scripts/*" = ["E402"]
+"tests/*" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["latkan"]

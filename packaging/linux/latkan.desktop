@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Latkan
+GenericName=Desktop Charms
+Comment=Charms that hang from the top of your screen on swinging ropes
+Exec=latkan
+Icon=latkan
+Terminal=false
+StartupNotify=false
+Categories=Utility;
+Keywords=charm;nazar;desktop;toy;physics;rope;

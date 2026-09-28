@@ -1,0 +1,14 @@
+# Normalise line endings in the repository; check out with the platform default...
+* text=auto
+
+# ...except files that must stay LF on every OS (a Windows checkout with core.autocrlf=true would
+# otherwise break these when they are run on macOS/Linux or inside CI containers).
+*.sh        text eol=lf
+*.desktop   text eol=lf
+*.spec      text eol=lf
+*.yml       text eol=lf
+
+# Binary assets
+*.png       binary
+*.ico       binary
+*.icns      binary

@@ -1,0 +1,211 @@
+name: Release
+
+# Push a tag that matches src/latkan/__init__.py's __version__ (e.g. v1.0.0) to build every platform
+# package and publish them as a GitHub release. Tags containing "-" (v1.1.0-rc1) become pre-releases.
+#
+# Optional macOS signing + notarisation - add these repository secrets to enable it:
+#   MACOS_CERT_P12       base64 of a "Developer ID Application" certificate exported as .p12
+#   MACOS_CERT_PASSWORD  password of that .p12
+#   APPLE_ID             Apple ID e-mail used for notarisation
+#   APPLE_TEAM_ID        10-character team ID
+#   APPLE_APP_PASSWORD   app-specific password for that Apple ID
+# Without them the app is ad-hoc signed (users right-click > Open the first time).
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUTF8: "1"
+  QT_QPA_PLATFORM: offscreen
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+          - name: macos-arm64
+            os: macos-14
+          - name: macos-x86_64
+            # GitHub retired the macos-13 image (Dec 2025); macos-15-intel is its x86_64 successor.
+            os: macos-15-intel
+          - name: linux-x86_64
+            # Oldest supported Ubuntu: the AppImage needs a glibc at least as new as the build machine's.
+            os: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check tag matches __version__
+        run: |
+          version="$(python -c 'import sys; sys.path.insert(0, "scripts"); import build; print(build.read_version())')"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match __version__ = $version in src/latkan/__init__.py"
+            exit 1
+          fi
+
+      - name: Install Inno Setup (Windows)
+        if: runner.os == 'Windows'
+        run: choco install innosetup -y --no-progress
+
+      - name: Install Qt runtime and FUSE libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libdbus-1-3 libfontconfig1 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1 libfuse2 desktop-file-utils
+
+      - name: Install build dependencies
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # Qt >= 6.10 needs macOS 13; stay on 6.9.x so the published app keeps macOS 12 support.
+            python -m pip install ".[dev]" "PySide6-Essentials<6.10"
+          else
+            python -m pip install ".[dev]"
+          fi
+
+      # ---------------------------------------------------------------- optional macOS signing
+      - name: Detect signing secrets (macOS)
+        id: signing
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          sign=false; notarize=false
+          if [ -n "$MACOS_CERT_P12" ]; then sign=true; fi
+          if [ "$sign" = true ] && [ -n "$APPLE_ID" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$APPLE_APP_PASSWORD" ]; then
+            notarize=true
+          fi
+          echo "sign=$sign" >> "$GITHUB_OUTPUT"
+          echo "notarize=$notarize" >> "$GITHUB_OUTPUT"
+          echo "Developer ID signing: $sign, notarization: $notarize"
+
+      - name: Import Developer ID certificate (macOS)
+        if: steps.signing.outputs.sign == 'true'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/latkan-signing.keychain-db"
+          keychain_password="$(openssl rand -base64 32)"
+          cert="$RUNNER_TEMP/latkan-cert.p12"
+          printf '%s' "$MACOS_CERT_P12" | base64 --decode > "$cert"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$cert" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain"
+          # keep the existing keychains in the search list (word splitting intended)
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm -f "$cert"
+          identity="$(security find-identity -v -p codesigning "$keychain" \
+            | sed -nE 's/.*"(Developer ID Application: [^"]+)".*/\1/p' | head -n 1)"
+          if [ -z "$identity" ]; then
+            echo "::error::No 'Developer ID Application' identity found in MACOS_CERT_P12"
+            exit 1
+          fi
+          echo "MACOS_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      # ------------------------------------------------------------------------------ build
+      - name: Build (icons -> PyInstaller -> OS package)
+        env:
+          APPIMAGE: ${{ runner.os == 'Linux' && '1' || '' }}
+          ALLOW_DOWNLOAD: ${{ runner.os == 'Linux' && '1' || '' }}
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            python scripts/build.py --portable-zip
+          else
+            python scripts/build.py
+          fi
+
+      # ------------------------------------------------------------- optional notarisation
+      - name: Notarize and staple the disk image (macOS)
+        if: steps.signing.outputs.notarize == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          dmg="$(ls dist/Latkan-*.dmg)"
+          result="$RUNNER_TEMP/notary.json"
+          xcrun notarytool submit "$dmg" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" \
+            --wait --timeout 45m --output-format json > "$result"
+          cat "$result"
+          status="$(python -c 'import json, sys; print(json.load(open(sys.argv[1])).get("status", ""))' "$result")"
+          if [ "$status" != "Accepted" ]; then
+            submission="$(python -c 'import json, sys; print(json.load(open(sys.argv[1])).get("id", ""))' "$result")"
+            echo "::error::Notarization status: ${status:-unknown}"
+            if [ -n "$submission" ]; then
+              xcrun notarytool log "$submission" \
+                --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" || true
+            fi
+            exit 1
+          fi
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"             || echo "::warning::spctl assessment of $dmg failed (the notarization ticket is stapled)"
+
+      - name: Remove signing keychain (macOS)
+        if: always() && steps.signing.outputs.sign == 'true'
+        run: security delete-keychain "$RUNNER_TEMP/latkan-signing.keychain-db" || true
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: latkan-${{ matrix.name }}
+          path: dist/Latkan-*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: latkan-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: artifacts
+        run: |
+          sha256sum Latkan-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true

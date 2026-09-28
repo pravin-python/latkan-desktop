@@ -1,0 +1,41 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows 10, Windows 11, macOS (Apple Silicon), macOS (Intel), Ubuntu / Debian, Other Linux]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Latkan version
+      description: Output of `latkan --version`, or the release you downloaded.
+    validations:
+      required: true
+  - type: input
+    id: session
+    attributes:
+      label: Linux only — desktop and session
+      description: e.g. GNOME on Wayland, KDE on X11
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        Attach `latkan.log` from the logs folder — Windows `%APPDATA%\Latkan\logs`,
+        macOS `~/Library/Application Support/Latkan/logs`, Linux `~/.config/latkan/logs`.
+      render: text
