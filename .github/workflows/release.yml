@@ -177,7 +177,7 @@ jobs:
         run: security delete-keychain "$RUNNER_TEMP/latkan-signing.keychain-db" || true
 
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: latkan-${{ matrix.name }}
           path: dist/Latkan-*
